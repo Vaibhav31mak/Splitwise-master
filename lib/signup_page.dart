@@ -24,7 +24,7 @@ class _SignupPageState extends State<SignupPage> {
     if (user != null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => HomePage()),
+        MaterialPageRoute(builder: (context) => LoginPage()),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
