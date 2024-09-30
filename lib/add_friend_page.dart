@@ -44,7 +44,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
           _users = snapshot.docs
               .where((user) => user.id != currentUserId && !friends.contains(user.id))
               .toList();
-
+              
           _filteredUsers = _users;
           _filteredUsersNotifier.value = _filteredUsers;
         });

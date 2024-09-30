@@ -6,6 +6,7 @@ class SettleUpPage extends StatefulWidget {
   @override
   _SettleUpPageState createState() => _SettleUpPageState();
 }
+
 class _SettleUpPageState extends State<SettleUpPage> {
   List<Map<String, dynamic>> _friendBalances = [];
 
@@ -20,12 +21,18 @@ class _SettleUpPageState extends State<SettleUpPage> {
     if (currentUser == null) return;
 
     try {
-      // Fetch the user's friends
+      // Fetch the user's username
+      final currentUserSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+      final currentUsername = currentUserSnapshot.data()?['username'] ?? 'Unknown';
+
+      // Fetch the user's friends (by their UID)
       final DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
           .collection('friends')
           .doc(currentUser.uid)
           .get();
-
       final List<String> friendIds = List<String>.from((userSnapshot.data() as Map<String, dynamic>)['friends'] ?? []);
 
       List<Map<String, dynamic>> friendBalances = [];
@@ -38,41 +45,36 @@ class _SettleUpPageState extends State<SettleUpPage> {
         final friendSnapshot = await FirebaseFirestore.instance.collection('users').doc(friendId).get();
         final friendUsername = friendSnapshot.data()?['username'] ?? 'Unknown';
 
-        // Fetch split requests where current user is "from"
+        // Fetch split requests where current user is "from" (using UID)
         final fromRequests = await FirebaseFirestore.instance
             .collection('split_requests')
             .where('from', isEqualTo: currentUser.uid)
-            .where('to', isEqualTo: friendUsername) // Use the username here
+            .where('to', isEqualTo: friendUsername) // Use username for 'to'
             .get();
-
-        print('From requests for friendId $friendId: ${fromRequests.docs.length}');
 
         // Calculate total amount the friend owes to the user
         for (var request in fromRequests.docs) {
           netBalance += (request.data()['amount'] ?? 0.0);
         }
 
-        // Fetch split requests where current user is "to" (using UID to username mapping)
+        // Fetch split requests where current user is "to" (using username for 'to')
         final toRequests = await FirebaseFirestore.instance
             .collection('split_requests')
-            .where('to', isEqualTo: currentUser.displayName) // Use the current user's username
-            .where('from', isEqualTo: friendId) // Use UID for 'from'
+            .where('to', isEqualTo: currentUsername) // Use current user's username for 'to'
+            .where('from', isEqualTo: friendId) // Use friend's UID for 'from'
             .get();
-
-        print('To requests for friendId $friendId: ${toRequests.docs.length}');
 
         // Calculate total amount the user owes to the friend
         for (var request in toRequests.docs) {
           netBalance -= (request.data()['amount'] ?? 0.0);
         }
 
+        // Add friend balance to the list
         friendBalances.add({
           'friendId': friendId,
           'friendName': friendUsername,
           'netBalance': netBalance,
         });
-
-        print('Net balance for friendId $friendId: $netBalance');
       }
 
       setState(() {
@@ -84,41 +86,38 @@ class _SettleUpPageState extends State<SettleUpPage> {
     }
   }
 
-
   Future<void> _cancelExpenses(String friendId, String friendName) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
     try {
-      print('Current User ID: ${currentUser.uid}');
-      print('Attempting to delete requests for Friend ID: $friendId');
+      // Fetch current user's username
+      final currentUserSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+      final currentUsername = currentUserSnapshot.data()?['username'] ?? 'Unknown';
 
-      // Deleting 'from' requests
+      // Deleting 'from' requests (current user owes the friend)
       final fromRequests = await FirebaseFirestore.instance
           .collection('split_requests')
           .where('from', isEqualTo: currentUser.uid)
-          .where('to', isEqualTo: friendName) // Use the friend's username
+          .where('to', isEqualTo: friendName) // Use friend's username for 'to'
           .get();
-
-      print('From requests for friendId $friendId: ${fromRequests.docs.length}');
 
       for (var request in fromRequests.docs) {
         await request.reference.delete();
-        print('Deleted request: ${request.id}');
       }
 
-      // Deleting 'to' requests
+      // Deleting 'to' requests (friend owes the current user)
       final toRequests = await FirebaseFirestore.instance
           .collection('split_requests')
-          .where('to', isEqualTo: currentUser.displayName)
-          .where('from', isEqualTo: friendId) // Use friendId (user ID)
+          .where('to', isEqualTo: currentUsername) // Use current user's username for 'to'
+          .where('from', isEqualTo: friendId) // Use friend's UID for 'from'
           .get();
-
-      print('To requests for friendId $friendId: ${toRequests.docs.length}');
 
       for (var request in toRequests.docs) {
         await request.reference.delete();
-        print('Deleted request: ${request.id}');
       }
 
       // Refresh the balances
@@ -133,7 +132,6 @@ class _SettleUpPageState extends State<SettleUpPage> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -142,26 +140,26 @@ class _SettleUpPageState extends State<SettleUpPage> {
       ),
       body: _friendBalances.isNotEmpty
           ? ListView.builder(
-        itemCount: _friendBalances.length,
-        itemBuilder: (context, index) {
-          final friendBalance = _friendBalances[index];
-          final netBalance = friendBalance['netBalance'];
-          final friendName = friendBalance['friendName'];
+              itemCount: _friendBalances.length,
+              itemBuilder: (context, index) {
+                final friendBalance = _friendBalances[index];
+                final netBalance = friendBalance['netBalance'];
+                final friendName = friendBalance['friendName'];
 
-          return ListTile(
-            title: Text(friendName),
-            subtitle: Text(netBalance > 0
-                ? 'Owes you: \$${netBalance.toStringAsFixed(2)}'
-                : 'You owe: \$${netBalance.abs().toStringAsFixed(2)}'),
-            trailing: netBalance > 0
-                ? ElevatedButton(
-              onPressed: () => _cancelExpenses(friendBalance['friendId'], friendName),
-              child: Text('Cancel'),
+                return ListTile(
+                  title: Text(friendName),
+                  subtitle: Text(netBalance > 0
+                      ? 'Owes you: \$${netBalance.toStringAsFixed(2)}'
+                      : 'You owe: \$${netBalance.abs().toStringAsFixed(2)}'),
+                  trailing: netBalance > 0
+                      ? ElevatedButton(
+                          onPressed: () => _cancelExpenses(friendBalance['friendId'], friendName),
+                          child: Text('Cancel'),
+                        )
+                      : null,
+                );
+              },
             )
-                : null,
-          );
-        },
-      )
           : Center(child: CircularProgressIndicator()),
     );
   }

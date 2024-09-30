@@ -110,22 +110,22 @@ class _HomePageState extends State<HomePage> {
             Expanded(
               child: ListView(
                 children: [
-                  _buildNavigationButton(context, 'Split Expense', BillSplitScreen()),
+                  _buildNavigationButton(context, 'Split Expense', BillSplitScreen()),//4
                   SizedBox(height: 20),
-                  _buildNavigationButton(context, 'View Split Requests', SplitRequestsPage()),
+                  _buildNavigationButton(context, 'View Split Requests', SplitRequestsPage()),//5
                   SizedBox(height: 20),
-                  _buildNavigationButton(context, 'View Splits Requested', SplitRequestedPage()),
+                  _buildNavigationButton(context, 'View Splits Requested', SplitRequestedPage()),//6
                   SizedBox(height: 20),
-                  _buildNavigationButton(context, 'Add Friend', AddFriendPage()),
+                  _buildNavigationButton(context, 'Add Friend', AddFriendPage()),//1
                   SizedBox(height: 20),
-                  _buildNavigationButton(context, 'Settle Up', SettleUpPage()),
+                  _buildNavigationButton(context, 'Settle Up', SettleUpPage()),//7
                   SizedBox(height: 20),
-                  _buildNavigationButton(context, 'Friend Requests', FriendRequestsPage(
+                  _buildNavigationButton(context, 'Friend Requests', FriendRequestsPage(//2
                     friendRequests: _friendRequests,
                     onAccept: _fetchFriendRequests,
                   )),
                   SizedBox(height: 20),
-                  _buildNavigationButton(context, 'Friends', FriendsPage()),
+                  _buildNavigationButton(context, 'Friends', FriendsPage()),//3
                 ],
               ),
             ),
