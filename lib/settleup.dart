@@ -45,28 +45,32 @@ class _SettleUpPageState extends State<SettleUpPage> {
         final friendSnapshot = await FirebaseFirestore.instance.collection('users').doc(friendId).get();
         final friendUsername = friendSnapshot.data()?['username'] ?? 'Unknown';
 
-        // Fetch split requests where current user is "from" (using UID)
-        final fromRequests = await FirebaseFirestore.instance
+        // Fetch all split requests involving the current user and the friend
+        final splitRequests = await FirebaseFirestore.instance
             .collection('split_requests')
             .where('from', isEqualTo: currentUser.uid)
-            .where('to', isEqualTo: friendUsername) // Use username for 'to'
+            .where('to', isEqualTo: friendUsername) // Use friend's username for 'to'
             .get();
 
         // Calculate total amount the friend owes to the user
-        for (var request in fromRequests.docs) {
-          netBalance += (request.data()['amount'] ?? 0.0);
+        for (var request in splitRequests.docs) {
+          if (request.data()['status'] != 'cancelled') { // Filter out cancelled requests in code
+            netBalance += (request.data()['amount'] ?? 0.0);
+          }
         }
 
-        // Fetch split requests where current user is "to" (using username for 'to')
-        final toRequests = await FirebaseFirestore.instance
+        // Fetch requests where the friend owes the current user
+        final incomingRequests = await FirebaseFirestore.instance
             .collection('split_requests')
             .where('to', isEqualTo: currentUsername) // Use current user's username for 'to'
             .where('from', isEqualTo: friendId) // Use friend's UID for 'from'
             .get();
 
         // Calculate total amount the user owes to the friend
-        for (var request in toRequests.docs) {
-          netBalance -= (request.data()['amount'] ?? 0.0);
+        for (var request in incomingRequests.docs) {
+          if (request.data()['status'] != 'cancelled') { // Filter out cancelled requests in code
+            netBalance -= (request.data()['amount'] ?? 0.0);
+          }
         }
 
         // Add friend balance to the list
@@ -91,14 +95,14 @@ class _SettleUpPageState extends State<SettleUpPage> {
     if (currentUser == null) return;
 
     try {
-      // Fetch current user's username
+      // Update the status of requests instead of deleting them
       final currentUserSnapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
       final currentUsername = currentUserSnapshot.data()?['username'] ?? 'Unknown';
 
-      // Deleting 'from' requests (current user owes the friend)
+      // Updating 'from' requests (current user owes the friend)
       final fromRequests = await FirebaseFirestore.instance
           .collection('split_requests')
           .where('from', isEqualTo: currentUser.uid)
@@ -106,10 +110,10 @@ class _SettleUpPageState extends State<SettleUpPage> {
           .get();
 
       for (var request in fromRequests.docs) {
-        await request.reference.delete();
+        await request.reference.update({'status': 'cancelled'});
       }
 
-      // Deleting 'to' requests (friend owes the current user)
+      // Updating 'to' requests (friend owes the current user)
       final toRequests = await FirebaseFirestore.instance
           .collection('split_requests')
           .where('to', isEqualTo: currentUsername) // Use current user's username for 'to'
@@ -117,7 +121,7 @@ class _SettleUpPageState extends State<SettleUpPage> {
           .get();
 
       for (var request in toRequests.docs) {
-        await request.reference.delete();
+        await request.reference.update({'status': 'cancelled'});
       }
 
       // Refresh the balances
