@@ -13,14 +13,24 @@ class _ProfilePageState extends State<ProfilePage> {
   String _email = '';
   double _totalExpenses = 0.0;
   double _averageExpenses = 0.0;
-  List<double> _monthlyExpenses = List.filled(12, 0.0); // Initialize list for 12 months
-  String _selectedYear = DateTime.now().year.toString(); // Default selected year
+  List<double> _monthlyExpenses = List.filled(
+      12, 0.0); // Initialize list for 12 months
+  String _selectedYear = DateTime
+      .now()
+      .year
+      .toString(); // Default selected year
+
+  // New variables for friends' expense analysis
+  List<String> _friendNames = [];
+  List<double> _pendingExpenses = [];
+  List<double> _cancelledExpenses = [];
 
   @override
   void initState() {
     super.initState();
     _fetchUserDetails();
     _fetchExpenseAnalysis(); // Fetch default year data
+    _fetchFriendsExpenseAnalysis(); // Fetch friends' expense data
   }
 
   Future<void> _fetchUserDetails() async {
@@ -41,37 +51,27 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _fetchExpenseAnalysis() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
-      // Fetch the current user's username
       final userSnapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
 
       String username = userSnapshot['username'] ?? '';
-
-      // Determine the start and end timestamps for the selected year
       DateTime startOfYear = DateTime(int.parse(_selectedYear), 1, 1);
-      DateTime endOfYear = DateTime(int.parse(_selectedYear), 12, 31, 23, 59, 59);
+      DateTime endOfYear = DateTime(
+          int.parse(_selectedYear), 12, 31, 23, 59, 59);
 
       try {
         final snapshot = await FirebaseFirestore.instance
             .collection('split_requests')
             .where('to', isEqualTo: username)
             .where('status', isEqualTo: 'approved')
-            .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfYear))
-            .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(endOfYear))
+            .where('timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfYear))
+            .where(
+            'timestamp', isLessThanOrEqualTo: Timestamp.fromDate(endOfYear))
             .orderBy('timestamp')
             .get();
-
-        if (snapshot.docs.isNotEmpty) {
-          // Process the documents
-          for (var doc in snapshot.docs) {
-            print("Document ID: ${doc.id}");
-            print("Document Data: ${doc.data()}");
-          }
-        } else {
-          print("No documents found for the selected year.");
-        }
 
         double totalExpenses = 0.0;
         List<double> monthlyExpenses = List.filled(12, 0.0);
@@ -96,6 +96,90 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _fetchFriendsExpenseAnalysis() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      try {
+        final userSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUser.uid)
+            .get();
+
+        String username = userSnapshot['username'] ?? '';
+
+        // Fetching the current user's friends from the friends collection
+        final friendsDocSnapshot = await FirebaseFirestore.instance
+            .collection('friends')
+            .doc(currentUser.uid) // Accessing the document for the current user
+            .get();
+
+        if (!friendsDocSnapshot.exists) {
+          print('No friends found for the current user.');
+          return; // Exit if no friends document exists
+        }
+
+        List<String> friendNames = [];
+        List<double> pendingExpenses = [];
+        List<double> cancelledExpenses = [];
+
+        // Assuming the friends are stored as a list in the document
+        List<dynamic> friendsList = friendsDocSnapshot.data()?['friends'] ?? [];
+
+        print('Number of friends: ${friendsList.length}');
+
+        for (var friendId in friendsList) {
+          // Get friend's name from the users table
+          final friendSnapshot = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(friendId)
+              .get();
+
+          if (friendSnapshot.exists) {
+            String friendName = friendSnapshot['username'] ?? 'Unknown';
+            print('name: $friendName id: $friendId');
+            // Calculate pending and cancelled expenses for each friend
+            final splitRequestsSnapshot = await FirebaseFirestore.instance
+                .collection('split_requests')
+                .where('from', isEqualTo: currentUser.uid)
+                .where('to', isEqualTo: friendName)
+                .get();
+
+            double pendingAmount = 0.0;
+            double cancelledAmount = 0.0;
+
+            for (var splitDoc in splitRequestsSnapshot.docs) {
+              double amount = (splitDoc['amount'] as num).toDouble();
+              String status = splitDoc['status'];
+
+              if (status == 'pending') {
+                pendingAmount += amount;
+              } else if (status == 'cancelled') {
+                cancelledAmount += amount;
+              }
+            }
+
+            friendNames.add(friendName);
+            pendingExpenses.add(pendingAmount);
+            cancelledExpenses.add(cancelledAmount);
+          } else {
+            print('Friend not found for ID: $friendId');
+          }
+        }
+
+        print('Friend Names: $friendNames');
+        print('Pending Expenses: $pendingExpenses');
+        print('Cancelled Expenses: $cancelledExpenses');
+
+        setState(() {
+          _friendNames = friendNames;
+          _pendingExpenses = pendingExpenses;
+          _cancelledExpenses = cancelledExpenses;
+        });
+      } catch (e) {
+        print("Error fetching friends' expenses: $e");
+      }
+    }
+  }
 
 
   List<BarChartGroupData> _buildBarGroups() {
@@ -113,10 +197,42 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
+  List<BarChartGroupData> _buildFriendsBarGroups() {
+    return List.generate(_friendNames.length, (index) {
+      return BarChartGroupData(
+        x: index,
+        barRods: [
+          BarChartRodData(
+            toY: _pendingExpenses[index],
+            color: Colors.orange,
+            width: 8,
+            borderRadius: BorderRadius.circular(0),
+          ),
+          BarChartRodData(
+            toY: _cancelledExpenses[index],
+            color: Colors.red,
+            width: 8,
+            borderRadius: BorderRadius.circular(0),
+          ),
+        ],
+      );
+    });
+  }
+
   double _getMaxYValue() {
-    // Determine the maximum Y value dynamically based on monthly expenses
     double maxExpense = _monthlyExpenses.reduce((a, b) => a > b ? a : b);
     return maxExpense + (maxExpense * 0.2); // Add 20% padding to the max value
+  }
+
+  double _getMaxFriendsYValue() {
+    double maxPending = _pendingExpenses.isNotEmpty
+        ? _pendingExpenses.reduce((a, b) => a > b ? a : b)
+        : 0.0;
+    double maxCancelled = _cancelledExpenses.isNotEmpty
+        ? _cancelledExpenses.reduce((a, b) => a > b ? a : b)
+        : 0.0;
+    double maxExpense = maxPending > maxCancelled ? maxPending : maxCancelled;
+    return maxExpense + (maxExpense * 0.2);
   }
 
   @override
@@ -126,7 +242,7 @@ class _ProfilePageState extends State<ProfilePage> {
         title: Text('Profile'),
         backgroundColor: Colors.teal,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,7 +265,6 @@ class _ProfilePageState extends State<ProfilePage> {
             SizedBox(height: 20),
             Divider(),
             SizedBox(height: 20),
-            // Year selection dropdown
             Row(
               children: [
                 Text('Select Year:', style: TextStyle(fontSize: 18)),
@@ -157,7 +272,9 @@ class _ProfilePageState extends State<ProfilePage> {
                 DropdownButton<String>(
                   value: _selectedYear,
                   items: List.generate(10, (index) {
-                    String year = (DateTime.now().year - index).toString();
+                    String year = (DateTime
+                        .now()
+                        .year - index).toString();
                     return DropdownMenuItem(
                       value: year,
                       child: Text(year),
@@ -167,56 +284,37 @@ class _ProfilePageState extends State<ProfilePage> {
                     if (newYear != null) {
                       setState(() {
                         _selectedYear = newYear;
+                        _fetchExpenseAnalysis(); // Update graph based on selected year
                       });
-                      _fetchExpenseAnalysis(); // Fetch data for the selected year
                     }
                   },
                 ),
               ],
             ),
-            SizedBox(height: 20),
-            Text(
-              'Expense Analysis',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 10),
-            Expanded(
+            SizedBox(height: 20), // Padding between dropdown and chart
+            Container(
+              height: 300, // Fixed height for the chart
               child: BarChart(
                 BarChartData(
-                  alignment: BarChartAlignment.spaceAround,
-                  maxY: _getMaxYValue(), // Dynamically set maxY based on expenses
+                  maxY: _getMaxYValue(),
                   barGroups: _buildBarGroups(),
                   titlesData: FlTitlesData(
                     leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: false, // Hide the left Y-axis labels
-                      ),
+                      sideTitles: SideTitles(showTitles: false),
                     ),
-
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (double value, TitleMeta meta) {
-                          const months = [
+                          List<String> months = [
                             'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                             'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
                           ];
-                          return Text(
-                            months[value.toInt()],
-                            style: TextStyle(color: Colors.black),
-                          );
+                          return Text(months[value.toInt()]);
                         },
                       ),
                     ),
-                    topTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false), // Hiding top side titles
-                    ),
                   ),
-                  borderData: FlBorderData(
-                    show: true,
-                    border: Border.all(color: Colors.black, width: 1),
-                  ),
-                  gridData: FlGridData(show: false),
                 ),
               ),
             ),
@@ -229,6 +327,50 @@ class _ProfilePageState extends State<ProfilePage> {
             Text(
               'Average Expense: \$$_averageExpenses',
               style: TextStyle(fontSize: 18),
+            ),
+            SizedBox(height: 20), // Padding between graphs
+            Container(
+              height: 300, // Fixed height for the friends' chart
+              child: BarChart(
+                BarChartData(
+                  maxY: _getMaxFriendsYValue(),
+                  barGroups: _buildFriendsBarGroups(),
+                  titlesData: FlTitlesData(
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (double value, TitleMeta meta) {
+                          return Text(_friendNames[value.toInt()]);
+                        },
+                      ),
+                    ),
+                  ),
+
+                ),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  children: [
+                    Container(width: 20, height: 20, color: Colors.orange),
+                    SizedBox(width: 5),
+                    Text('Pending Amount'),
+                  ],
+                ),
+                SizedBox(width: 20),
+                Row(
+                  children: [
+                    Container(width: 20, height: 20, color: Colors.red),
+                    SizedBox(width: 5),
+                    Text('Cancelled Amount'),
+                  ],
+                ),
+              ],
             ),
           ],
         ),
