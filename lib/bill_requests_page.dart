@@ -91,7 +91,6 @@ class _SplitRequestsPageState extends State<SplitRequestsPage> {
           'status': 'approved',
         });
 
-
         setState(() {}); // Refresh the UI
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -130,72 +129,78 @@ class _SplitRequestsPageState extends State<SplitRequestsPage> {
 
   @override
   Widget build(BuildContext context) {
-  // Filter out requests with status 'cancelled'
-  final activeReceivedRequests = _receivedRequests.where((request) {
-    return request['status'] != 'cancelled'; // Only include non-cancelled requests
-  }).toList();
+    // Filter out requests with status 'cancelled'
+    final activeReceivedRequests = _receivedRequests.where((request) {
+      return request['status'] != 'cancelled'; // Only include non-cancelled requests
+    }).toList();
 
-  return Scaffold(
-    appBar: AppBar(
-      title: Text('Split Requests'),
-      backgroundColor: Colors.teal,
-    ),
-    body: _isLoading
-        ? Center(child: CircularProgressIndicator()) // Show loading indicator while fetching data
-        : activeReceivedRequests.isEmpty
-            ? Center(child: Text('No split requests received', style: TextStyle(fontSize: 18, color: Colors.grey)))
-            : ListView.builder(
-                itemCount: activeReceivedRequests.length,
-                itemBuilder: (context, index) {
-                  final request = activeReceivedRequests[index];
-                  final fromUsername = _getUserNameById(request['from']);
-                  final amount = request['amount'].toStringAsFixed(2);
-                  final status = request['status'];
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Split Requests'),
+        backgroundColor: Colors.teal,
+      ),
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator()) // Show loading indicator while fetching data
+          : activeReceivedRequests.isEmpty
+              ? Center(child: Text('No split requests received', style: TextStyle(fontSize: 18, color: Colors.grey)))
+              : ListView.builder(
+                  itemCount: activeReceivedRequests.length,
+                  itemBuilder: (context, index) {
+                    final request = activeReceivedRequests[index];
+                    final amount = request['amount'].toStringAsFixed(2);
+                    final status = request['status'];
+                    final description = request['description'] ?? 'No description'; // Get the description or default
 
-                  return Card(
-                    child: ListTile(
-                      title: FutureBuilder<String?>(
-                        future: _getUserNameById(request['from']),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return Text('Loading...'); // Display a loading indicator while the username is being fetched
-                          } else if (snapshot.hasError) {
-                            return Text('Error fetching name'); // Handle error
-                          } else {
-                            final fromUsername = snapshot.data ?? 'Unknown'; // Fallback in case the username is null
-                            return Text('From: $fromUsername');
-                          }
-                        },
-                      ),
-                      subtitle: Text('Amount: \$${amount}\nStatus: $status'),
-                      trailing: status == 'pending'
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(Icons.check, color: Colors.green),
-                                  onPressed: () => _approveRequest(request.id),
+                    return Card(
+                      child: ListTile(
+                        title: FutureBuilder<String?>(
+                          future: _getUserNameById(request['from']),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return Text('Loading...'); // Display a loading indicator while the username is being fetched
+                            } else if (snapshot.hasError) {
+                              return Text('Error fetching name'); // Handle error
+                            } else {
+                              final fromUsername = snapshot.data ?? 'Unknown'; // Fallback in case the username is null
+                              return Text('From: $fromUsername');
+                            }
+                          },
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Amount: \$${amount}'),
+                            Text('Status: $status'),
+                            Text('Description: $description'), // Show the description
+                          ],
+                        ),
+                        trailing: status == 'pending'
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: Icon(Icons.check, color: Colors.green),
+                                    onPressed: () => _approveRequest(request.id),
+                                  ),
+                                  IconButton(
+                                    icon: Icon(Icons.clear, color: Colors.red),
+                                    onPressed: () => _rejectRequest(request.id),
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                status,
+                                style: TextStyle(
+                                  color: status == 'approved'
+                                      ? Colors.green
+                                      : Colors.red,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                IconButton(
-                                  icon: Icon(Icons.clear, color: Colors.red),
-                                  onPressed: () => _rejectRequest(request.id),
-                                ),
-                              ],
-                            )
-                          : Text(
-                              status,
-                              style: TextStyle(
-                                color: status == 'approved'
-                                    ? Colors.green
-                                    : Colors.red,
-                                fontWeight: FontWeight.bold,
                               ),
-                            ),
-                    ),
-                  );
-                },
-              ),
-  );
-}
-
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
 }

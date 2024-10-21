@@ -9,6 +9,7 @@ class SettleUpPage extends StatefulWidget {
 
 class _SettleUpPageState extends State<SettleUpPage> {
   List<Map<String, dynamic>> _friendBalances = [];
+  Map<String, TextEditingController> _amountControllers = {};
 
   @override
   void initState() {
@@ -28,7 +29,7 @@ class _SettleUpPageState extends State<SettleUpPage> {
           .get();
       final currentUsername = currentUserSnapshot.data()?['username'] ?? 'Unknown';
 
-      // Fetch the user's friends (by their UID)
+      // Fetch the user's friends
       final DocumentSnapshot userSnapshot = await FirebaseFirestore.instance
           .collection('friends')
           .doc(currentUser.uid)
@@ -37,7 +38,6 @@ class _SettleUpPageState extends State<SettleUpPage> {
 
       List<Map<String, dynamic>> friendBalances = [];
 
-      // For each friend, calculate the net balance
       for (final friendId in friendIds) {
         double netBalance = 0.0;
 
@@ -45,40 +45,42 @@ class _SettleUpPageState extends State<SettleUpPage> {
         final friendSnapshot = await FirebaseFirestore.instance.collection('users').doc(friendId).get();
         final friendUsername = friendSnapshot.data()?['username'] ?? 'Unknown';
 
-        // Fetch all split requests involving the current user and the friend
+        // Fetch outgoing requests (current user owes the friend)
         final splitRequests = await FirebaseFirestore.instance
             .collection('split_requests')
             .where('from', isEqualTo: currentUser.uid)
-            .where('to', isEqualTo: friendUsername) // Use friend's username for 'to'
+            .where('to', isEqualTo: friendUsername)
             .get();
 
-        // Calculate total amount the friend owes to the user
         for (var request in splitRequests.docs) {
-          if (request.data()['status'] != 'cancelled') { // Filter out cancelled requests in code
+          if (request.data()['status'] != 'cancelled') {
             netBalance += (request.data()['amount'] ?? 0.0);
           }
         }
 
-        // Fetch requests where the friend owes the current user
+        // Fetch incoming requests (friend owes the current user)
         final incomingRequests = await FirebaseFirestore.instance
             .collection('split_requests')
-            .where('to', isEqualTo: currentUsername) // Use current user's username for 'to'
-            .where('from', isEqualTo: friendId) // Use friend's UID for 'from'
+            .where('to', isEqualTo: currentUsername)
+            .where('from', isEqualTo: friendId)
             .get();
 
-        // Calculate total amount the user owes to the friend
         for (var request in incomingRequests.docs) {
-          if (request.data()['status'] != 'cancelled') { // Filter out cancelled requests in code
+          if (request.data()['status'] != 'cancelled') {
             netBalance -= (request.data()['amount'] ?? 0.0);
           }
         }
 
-        // Add friend balance to the list
         friendBalances.add({
           'friendId': friendId,
           'friendName': friendUsername,
           'netBalance': netBalance,
         });
+
+        // Create a TextEditingController for each friend who owes the user
+        if (netBalance > 0) {
+          _amountControllers[friendId] = TextEditingController();
+        }
       }
 
       setState(() {
@@ -90,50 +92,131 @@ class _SettleUpPageState extends State<SettleUpPage> {
     }
   }
 
+  Future<void> _settlePartialExpense(String friendId, String friendName, double amount) async {
+  final currentUser = FirebaseAuth.instance.currentUser;
+  if (currentUser == null) return;
+
+  try {
+    final friendBalance = _friendBalances.firstWhere(
+        (balance) => balance['friendName'] == friendName,
+        orElse: () => <String, dynamic>{}, // Return an empty map instead of null
+      );
+
+      // Check if the friendBalance map is empty
+      if (friendBalance.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Friend not found in balance list')));
+        return;
+      }
+
+      double netBalance = friendBalance['netBalance'] ?? 0.0; // Ensure netBalance has a default value
+
+      // Check if the amount entered is valid
+      if (amount <= 0 || amount > netBalance) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Enter a valid amount')));
+        return;
+      }
+
+      // Delete existing requests
+      await _deleteExpenses(friendName);
+
+    // Calculate remaining balance after the partial settlement
+    double remainingAmount = netBalance - amount;
+
+    // If there's a remaining balance, add a new split request
+    if (remainingAmount > 0) {
+      await _addSplitRequest(currentUser.uid, friendName, remainingAmount, 'pending', 'Partially settled');
+    }
+
+    // Refresh the balances
+    _fetchFriendsAndBalances();
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Settled partially with $friendName')));
+  } catch (e) {
+    print('Error settling partial expense: $e');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error settling expense')));
+  }
+}
+
+// Function to delete existing split requests for the friend
+  Future<void> _deleteExpenses(String friendName) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    try {
+      final requests = await FirebaseFirestore.instance
+          .collection('split_requests')
+          .where('from', isEqualTo: currentUser.uid)
+          .where('to', isEqualTo: friendName)
+          .get();
+
+      for (var request in requests.docs) {
+        await request.reference.delete(); // Delete the request
+      }
+    } catch (e) {
+      print('Error deleting expenses: $e');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error deleting expenses')));
+    }
+  }
+// Function to add a new split request
+Future<void> _addSplitRequest(String fromId, String toName, double amount, String status, String description) async {
+  try {
+    await FirebaseFirestore.instance.collection('split_requests').add({
+      'from': fromId,
+      'to': toName,
+      'amount': amount,
+      'status': status,
+      'description': description,
+    });
+  } catch (e) {
+    print('Error adding new split request: $e');
+  }
+}
+
+
   Future<void> _cancelExpenses(String friendId, String friendName) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
     try {
-      // Update the status of requests instead of deleting them
+      // Fetch the user's username
       final currentUserSnapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser.uid)
           .get();
       final currentUsername = currentUserSnapshot.data()?['username'] ?? 'Unknown';
 
-      // Updating 'from' requests (current user owes the friend)
+      // Cancel outgoing requests (current user owes the friend)
       final fromRequests = await FirebaseFirestore.instance
           .collection('split_requests')
           .where('from', isEqualTo: currentUser.uid)
-          .where('to', isEqualTo: friendName) // Use friend's username for 'to'
+          .where('to', isEqualTo: friendName)
           .get();
 
       for (var request in fromRequests.docs) {
         await request.reference.update({'status': 'cancelled'});
       }
 
-      // Updating 'to' requests (friend owes the current user)
+      // Cancel incoming requests (friend owes the current user)
       final toRequests = await FirebaseFirestore.instance
           .collection('split_requests')
-          .where('to', isEqualTo: currentUsername) // Use current user's username for 'to'
-          .where('from', isEqualTo: friendId) // Use friend's UID for 'from'
+          .where('to', isEqualTo: currentUsername)
+          .where('from', isEqualTo: friendId)
           .get();
 
       for (var request in toRequests.docs) {
         await request.reference.update({'status': 'cancelled'});
       }
-
-      // Refresh the balances
-      setState(() {
-        _friendBalances.removeWhere((balance) => balance['friendId'] == friendId);
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Expenses settled with $friendName')));
     } catch (e) {
       print('Error canceling expenses: $e');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error settling expenses')));
     }
+  }
+
+  @override
+  void dispose() {
+    // Dispose of all controllers to free up resources
+    _amountControllers.forEach((_, controller) => controller.dispose());
+    super.dispose();
   }
 
   @override
@@ -150,17 +233,40 @@ class _SettleUpPageState extends State<SettleUpPage> {
                 final netBalance = friendBalance['netBalance'];
                 final friendName = friendBalance['friendName'];
 
-                return ListTile(
-                  title: Text(friendName),
-                  subtitle: Text(netBalance > 0
-                      ? 'Owes you: \$${netBalance.toStringAsFixed(2)}'
-                      : 'You owe: \$${netBalance.abs().toStringAsFixed(2)}'),
-                  trailing: netBalance > 0
-                      ? ElevatedButton(
-                          onPressed: () => _cancelExpenses(friendBalance['friendId'], friendName),
-                          child: Text('Cancel'),
-                        )
-                      : null,
+                return Card(
+                  margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(friendName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        Text(netBalance > 0
+                            ? 'Owes you: \$${netBalance.toStringAsFixed(2)}'
+                            : 'You owe: \$${netBalance.abs().toStringAsFixed(2)}'),
+                        if (netBalance > 0) ...[
+                          TextField(
+                            controller: _amountControllers[friendBalance['friendId']],
+                            decoration: InputDecoration(labelText: 'Enter amount to settle'),
+                            keyboardType: TextInputType.number,
+                          ),
+                          SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: () {
+                              double? amount = double.tryParse(_amountControllers[friendBalance['friendId']]?.text ?? '');
+                              if (amount != null && amount > 0 && amount <= netBalance) {
+                                _settlePartialExpense(friendBalance['friendId'], friendName, amount);
+                                _amountControllers[friendBalance['friendId']]?.clear(); // Clear input after submission
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Enter a valid amount')));
+                              }
+                            },
+                            child: Text('Settle'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 );
               },
             )
