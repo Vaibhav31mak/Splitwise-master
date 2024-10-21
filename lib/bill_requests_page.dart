@@ -149,7 +149,10 @@ class _SplitRequestsPageState extends State<SplitRequestsPage> {
                     final request = activeReceivedRequests[index];
                     final amount = request['amount'].toStringAsFixed(2);
                     final status = request['status'];
-                    final description = request['description'] ?? 'No description'; // Get the description or default
+                    final requestData = request.data() as Map<String, dynamic>?;
+                    final description = requestData != null && requestData.containsKey('description')
+                        ? requestData['description']
+                        : 'No description'; // Get the description or default
 
                     return Card(
                       child: ListTile(
